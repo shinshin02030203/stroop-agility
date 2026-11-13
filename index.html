@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Stroop Agility Test</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body {
+      background: #fff;
+      color: #17202a;
+      font: 18px/1.4 -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN",
+        "Yu Gothic", Meiryo, sans-serif;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-text-size-adjust: 100%;
+    }
+    [hidden] { display: none !important; }
+    .screen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+      padding: 16px 24px;
+    }
+    h1 { margin: 0 0 20px; font-size: 32px; text-align: center; }
+    form { width: 100%; max-width: 360px; }
+    label { display: block; font-weight: 700; }
+    input {
+      width: 100%;
+      margin: 8px 0 16px;
+      padding: 10px 12px;
+      color: inherit;
+      background: #fff;
+      border: 1px solid #637082;
+      border-radius: 6px;
+      font: inherit;
+      font-size: 24px;
+      -webkit-user-select: text;
+      user-select: text;
+    }
+    button {
+      -webkit-appearance: none;
+      appearance: none;
+      display: block;
+      width: 100%;
+      min-height: 56px;
+      padding: 10px 16px;
+      border: 0;
+      border-radius: 8px;
+      background: #17202a;
+      color: #fff;
+      font: inherit;
+      font-size: 22px;
+      font-weight: 700;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    button:disabled { background: #e5e8eb; color: #4c5968; cursor: default; }
+    #notice { margin: 12px 0 0; color: #a32620; }
+    .metrics {
+      display: flex;
+      flex: 0 0 auto;
+      justify-content: space-between;
+      width: 100%;
+    }
+    .metric { color: #4c5968; }
+    .metric:last-child { text-align: right; }
+    .metric strong { display: block; color: #17202a; font-size: 38px; line-height: 1.15; }
+    .stage {
+      display: flex;
+      flex: 1 1 auto;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      min-height: 0;
+    }
+    #stimulus {
+      margin: 0;
+      font-size: 15vw;
+      font-size: 15vmin;
+      font-size: min(160px, 22vmin);
+      font-weight: 900;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    #next { flex: 0 0 auto; min-height: 84px; font-size: 30px; }
+    #result .label { margin: 0; }
+    #resultCount { margin: 0; font-size: 112px; line-height: 1.05; }
+    #resultTime { margin: 4px 0 18px; color: #4c5968; }
+    #back { max-width: 360px; }
+    @media (max-height: 420px) {
+      .screen { padding: 8px 16px; }
+      h1 { margin-bottom: 10px; font-size: 26px; }
+      .metric { font-size: 15px; }
+      .metric strong { font-size: 28px; }
+      #next { min-height: 56px; font-size: 24px; }
+      #resultCount { font-size: 72px; }
+      #resultTime { margin-bottom: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <main id="setup" class="screen">
+    <h1>Stroop Agility Test</h1>
+    <form id="settings">
+      <label for="duration">測定時間（秒）</label>
+      <input id="duration" type="number" inputmode="numeric" min="1" max="300" step="1" value="24" required>
+      <button type="submit">測定開始</button>
+      <p id="notice" role="status" hidden>画面が切り替わったため測定を中止しました。</p>
+    </form>
+  </main>
+
+  <main id="test" class="screen" hidden>
+    <div class="metrics">
+      <div class="metric">残り時間（秒）<strong id="remaining">24</strong></div>
+      <div class="metric">完了試行数<strong id="count">0</strong></div>
+    </div>
+    <div class="stage"><p id="stimulus"></p></div>
+    <button id="next" type="button" disabled>次へ</button>
+  </main>
+
+  <main id="result" class="screen" hidden>
+    <h1>Stroop Agility Test — Result</h1>
+    <p class="label">完了試行数</p>
+    <strong id="resultCount">0</strong>
+    <p id="resultTime"></p>
+    <button id="back" type="button">設定画面へ戻る</button>
+  </main>
+
+  <script>
+    (function () {
+      'use strict';
+
+      var colors = ['#d20f26', '#1452d3', '#00813c', '#b08700'];
+      var words = [
+        ['赤', '青', '緑', '黄'],
+        ['あか', 'あお', 'みどり', 'きいろ']
+      ];
+      var countdownMs = 3000;
+      var minimumTapInterval = 220;
+      var setup = document.getElementById('setup');
+      var test = document.getElementById('test');
+      var result = document.getElementById('result');
+      var settings = document.getElementById('settings');
+      var duration = document.getElementById('duration');
+      var notice = document.getElementById('notice');
+      var stimulus = document.getElementById('stimulus');
+      var remaining = document.getElementById('remaining');
+      var count = document.getElementById('count');
+      var next = document.getElementById('next');
+      var resultCount = document.getElementById('resultCount');
+      var resultTime = document.getElementById('resultTime');
+      var state = 'setup';
+      var timer;
+      var deadline;
+      var seconds;
+      var sequence;
+      var completed;
+      var lastTap;
+
+      function now() {
+        return window.performance && typeof window.performance.now === 'function'
+          ? window.performance.now()
+          : Date.now();
+      }
+
+      function showScreen(screen) {
+        setup.hidden = screen !== setup;
+        test.hidden = screen !== test;
+        result.hidden = screen !== result;
+      }
+
+      function shuffle(items) {
+        for (var i = items.length - 1; i > 0; i -= 1) {
+          var j = Math.floor(Math.random() * (i + 1));
+          var item = items[i];
+          items[i] = items[j];
+          items[j] = item;
+        }
+        return items;
+      }
+
+      function makeSequence(length) {
+        var colorOrder = [];
+        var matchingTrials = [];
+        var list = [];
+        length = Math.ceil(length / 5) * 5;
+
+        // Each group of four uses all display colors once.
+        while (colorOrder.length < length) {
+          var order = shuffle([0, 1, 2, 3]);
+          if (order[0] === colorOrder[colorOrder.length - 1]) {
+            var firstColor = order[0];
+            order[0] = order[1];
+            order[1] = firstColor;
+          }
+          colorOrder = colorOrder.concat(order);
+        }
+
+        // Pick one random matching position in each group of five.
+        for (var start = 0; start < length; start += 5) {
+          matchingTrials[start + Math.floor(Math.random() * 5)] = true;
+        }
+
+        var previousMeaning = -1;
+        for (var i = 0; i < length; i += 1) {
+          var color = colorOrder[i];
+          var meaning = color;
+          if (!matchingTrials[i]) {
+            var nextMatchingColor = matchingTrials[i + 1] ? colorOrder[i + 1] : -1;
+            var choices = [];
+            for (var candidate = 0; candidate < colors.length; candidate += 1) {
+              if (candidate !== color && candidate !== previousMeaning && candidate !== nextMatchingColor) {
+                choices.push(candidate);
+              }
+            }
+            meaning = choices[Math.floor(Math.random() * choices.length)];
+          }
+          list.push({ color: color, meaning: meaning });
+          previousMeaning = meaning;
+        }
+        return list;
+      }
+
+      function showStimulus() {
+        var trial = sequence[completed];
+        stimulus.textContent = words[completed % 2][trial.meaning];
+        stimulus.style.color = colors[trial.color];
+      }
+
+      function finish() {
+        state = 'result';
+        window.clearTimeout(timer);
+        next.disabled = true;
+        stimulus.textContent = '';
+        remaining.textContent = '0';
+        resultCount.textContent = String(completed);
+        resultTime.textContent = '設定時間 ' + seconds + ' 秒';
+        showScreen(result);
+      }
+
+      function showTime() {
+        var left = deadline - now();
+        if (left <= 0) {
+          finish();
+          return;
+        }
+        var wholeSeconds = Math.ceil(left / 1000);
+        remaining.textContent = String(wholeSeconds);
+        timer = window.setTimeout(showTime, left - (wholeSeconds - 1) * 1000);
+      }
+
+      function showCountdown() {
+        var left = deadline - now();
+        if (left <= 0) {
+          state = 'test';
+          showStimulus();
+          deadline = now() + seconds * 1000;
+          next.disabled = false;
+          showTime();
+          return;
+        }
+        var wholeSeconds = Math.ceil(left / 1000);
+        stimulus.textContent = String(wholeSeconds);
+        timer = window.setTimeout(showCountdown, left - (wholeSeconds - 1) * 1000);
+      }
+
+      settings.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var value = Number(duration.value);
+        if (state !== 'setup' || value < 1 || value > 300 || Math.floor(value) !== value) {
+          return;
+        }
+
+        state = 'countdown';
+        seconds = value;
+        sequence = makeSequence(Math.ceil(seconds * 1000 / minimumTapInterval) + 1);
+        completed = 0;
+        lastTap = -Infinity;
+        count.textContent = '0';
+        remaining.textContent = String(seconds);
+        stimulus.style.color = '';
+        stimulus.textContent = '3';
+        notice.hidden = true;
+        next.disabled = true;
+        showScreen(test);
+        deadline = now() + countdownMs;
+        showCountdown();
+      });
+
+      next.addEventListener('click', function () {
+        if (state !== 'test') {
+          return;
+        }
+        var pressed = now();
+        if (pressed >= deadline) {
+          finish();
+          return;
+        }
+        if (pressed - lastTap < minimumTapInterval) {
+          return;
+        }
+        lastTap = pressed;
+        completed += 1;
+        count.textContent = String(completed);
+        showStimulus();
+      });
+
+      document.getElementById('back').addEventListener('click', function () {
+        state = 'setup';
+        showScreen(setup);
+      });
+
+      function cancelMeasurement() {
+        if (state !== 'countdown' && state !== 'test') {
+          return;
+        }
+        window.clearTimeout(timer);
+        state = 'setup';
+        next.disabled = true;
+        stimulus.textContent = '';
+        notice.hidden = false;
+        showScreen(setup);
+      }
+
+      document.addEventListener('visibilitychange', function () {
+        if (document.hidden) {
+          cancelMeasurement();
+        }
+      });
+      window.addEventListener('pagehide', cancelMeasurement);
+    }());
+  </script>
+</body>
+</html>
